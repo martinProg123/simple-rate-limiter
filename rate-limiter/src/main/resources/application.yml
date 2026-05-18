@@ -1,0 +1,21 @@
+server:
+  port: ${SERVER_PORT:3051}
+  environment: ${SER_ENV:test}
+  api-ver: "v1"
+  secret-length: 32
+
+spring:
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+backend:
+  base-url: ${BACKEND_URL:http://localhost:3050}
+
+rate-limiter:
+  max-tokens: ${RATE_LIMITER_MAX_TOKENS:50}
+  refill-rate: ${RATE_LIMITER_REFILL_RATE:10}

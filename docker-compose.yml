@@ -1,0 +1,47 @@
+services:
+  k6:
+    image: grafana/k6:latest
+    profiles:
+      - k6
+    volumes:
+      - ./k6-tests:/scripts
+    environment:
+      - BASE_URL=http://rate-limiter:${SPRING_PORT}
+    depends_on:
+      rate-limiter:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
+
+  node-backend:
+    build: ./node-backend
+    ports:
+      - "${NODE_PORT}:${NODE_PORT}"
+    environment:
+      - PORT=${NODE_PORT}
+
+  rate-limiter:
+    build: ./rate-limiter
+    ports:
+      - "${SPRING_PORT}:${SPRING_PORT}"
+    environment:
+      - SERVER_PORT=${SPRING_PORT}
+      - SER_ENV=${SER_ENV}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - BACKEND_URL=http://node-backend:${NODE_PORT}
+      - RATE_LIMITER_MAX_TOKENS=${RATE_LIMITER_MAX_TOKENS}
+      - RATE_LIMITER_REFILL_RATE=${RATE_LIMITER_REFILL_RATE}
+    depends_on:
+      redis:
+        condition: service_healthy
+      node-backend:
+        condition: service_started

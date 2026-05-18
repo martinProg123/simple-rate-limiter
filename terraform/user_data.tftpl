@@ -1,0 +1,53 @@
+#!/bin/bash
+set -euo pipefail
+
+GHCR_USER="${ghcr_user}"
+GHCR_TOKEN="${ghcr_token}"
+
+# Install Docker
+dnf install -y docker
+systemctl enable --now docker
+usermod -aG docker ec2-user
+
+# Install Docker Compose plugin
+dnf install -y docker-compose-plugin
+
+# Login to GHCR
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+# Create app directory
+mkdir -p /opt/rate-limiter
+cd /opt/rate-limiter
+
+cat > docker-compose.yml <<COMPOSE
+services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+
+  node-backend:
+    image: ghcr.io/${ghcr_user}/node-backend:latest
+    restart: always
+
+  rate-limiter:
+    image: ghcr.io/${ghcr_user}/rate-limiter:latest
+    ports:
+      - "80:${spring_port}"
+    restart: always
+    environment:
+      - SERVER_PORT=${spring_port}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - BACKEND_URL=http://node-backend:${node_port}
+    depends_on:
+      - redis
+      - node-backend
+
+volumes:
+  redis-data:
+COMPOSE
+
+# Start services
+docker compose up -d

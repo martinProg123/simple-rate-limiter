@@ -1,0 +1,30 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+
+  node-backend:
+    image: ghcr.io/${GHCR_USER}/node-backend:latest
+    restart: always
+
+  rate-limiter:
+    image: ghcr.io/${GHCR_USER}/rate-limiter:latest
+    ports:
+      - "80:${SPRING_PORT}"
+    restart: always
+    environment:
+      - SERVER_PORT=${SPRING_PORT}
+      - SER_ENV=${SER_ENV}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - BACKEND_URL=http://node-backend:${NODE_PORT}
+      - RATE_LIMITER_MAX_TOKENS=${RATE_LIMITER_MAX_TOKENS}
+      - RATE_LIMITER_REFILL_RATE=${RATE_LIMITER_REFILL_RATE}
+    depends_on:
+      - redis
+      - node-backend
+
+volumes:
+  redis-data:
