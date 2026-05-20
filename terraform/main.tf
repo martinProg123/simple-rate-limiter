@@ -99,6 +99,7 @@ resource "aws_lb_target_group" "rate_limiter" {
   protocol    = "HTTP"
   target_type = "ip"
   vpc_id      = data.aws_vpc.default.id
+  deregistration_delay = 30
 
   health_check {
     path                = "/"
