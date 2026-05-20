@@ -117,16 +117,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USER: ${{ env.LOWER_OWNER }}
         run: |
+          COMMANDS_JSON=$(jq -n \
+            --arg c1 'for i in $(seq 1 12); do if sudo docker info >/dev/null 2>&1; then break; fi; sleep 10; done' \
+            --arg c2 'while [ ! -f /opt/rate-limiter/.boot-complete ]; do sleep 5; done' \
+            --arg c3 "echo $GH_TOKEN | sudo docker login ghcr.io -u $GH_USER --password-stdin" \
+            --arg c4 'cd /opt/rate-limiter && sudo docker compose pull && sudo docker compose up -d' \
+            '{commands: [$c1, $c2, $c3, $c4]}')
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters "$(jq -n \
-              --arg c1 'for i in $(seq 1 12); do if sudo docker info >/dev/null 2>&1; then break; fi; sleep 10; done' \
-              --arg c2 'sudo docker info >/dev/null 2>&1 || { echo "Docker not ready"; exit 1; }' \
-              --arg c2_5 'while [ ! -f /opt/rate-limiter/docker-compose.yml ]; do sleep 5; done' \
-              --arg c3 "echo $GH_TOKEN | sudo docker login ghcr.io -u $GH_USER --password-stdin" \
-              --arg c4 'cd /opt/rate-limiter && sudo docker compose pull && sudo docker compose up -d' \
-              '{commands: [$c1, $c2, $c3, $c4]}')" \
+            --parameters "$COMMANDS_JSON" \
             --output text \
             --query "Command.CommandId")
           aws ssm wait command-executed \

@@ -44,3 +44,6 @@ services:
 volumes:
   redis-data:
 COMPOSE
+
+# Signal user_data completion
+touch /opt/rate-limiter/.boot-complete
