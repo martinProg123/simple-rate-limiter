@@ -82,8 +82,6 @@ jobs:
         id: tf-apply
         working-directory: ./terraform
         run: terraform apply -auto-approve
-        env:
-          TF_VAR_ghcr_user: ${{ env.LOWER_OWNER }}
 
       - name: Get EC2 info
         id: ec2-info
@@ -117,9 +115,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USER: ${{ env.LOWER_OWNER }}
         run: |
+          COMPOSE_BASE64=$(printf 'services:\n  redis:\n    image: redis:7-alpine\n    restart: always\n    volumes:\n      - redis-data:/data\n\n  node-backend:\n    image: ghcr.io/__GHCR_USER__/node-backend:latest\n    restart: always\n\n  rate-limiter:\n    image: ghcr.io/__GHCR_USER__/rate-limiter:latest\n    ports:\n      - "80:3051"\n    restart: always\n    environment:\n      - SERVER_PORT=3051\n      - REDIS_HOST=redis\n      - REDIS_PORT=6379\n      - BACKEND_URL=http://node-backend:3050\n      - RATE_LIMITER_MAX_TOKENS=50\n      - RATE_LIMITER_REFILL_RATE=10\n    depends_on:\n      - redis\n      - node-backend\n\nvolumes:\n  redis-data:\n' | base64 -w0)
           COMMANDS_JSON=$(jq -n \
             --arg c1 'for i in $(seq 1 12); do if sudo docker info >/dev/null 2>&1; then break; fi; sleep 10; done' \
-            --arg c2 'while [ ! -f /opt/rate-limiter/.boot-complete ]; do sleep 5; done' \
+            --arg c2 "sudo mkdir -p /opt/rate-limiter && echo '$COMPOSE_BASE64' | base64 -d | sed 's/__GHCR_USER__/$GH_USER/g' | sudo tee /opt/rate-limiter/docker-compose.yml > /dev/null" \
             --arg c3 "echo $GH_TOKEN | sudo docker login ghcr.io -u $GH_USER --password-stdin" \
             --arg c4 'cd /opt/rate-limiter && sudo docker compose pull && sudo docker compose up -d' \
             '{commands: [$c1, $c2, $c3, $c4]}')
@@ -175,5 +174,3 @@ jobs:
         if: always()
         working-directory: ./terraform
         run: terraform destroy -auto-approve
-        env:
-          TF_VAR_ghcr_user: ${{ env.LOWER_OWNER }}

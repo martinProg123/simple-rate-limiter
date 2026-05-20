@@ -80,13 +80,7 @@ resource "aws_instance" "rate_limiter" {
   iam_instance_profile   = aws_iam_instance_profile.ssm.name
   vpc_security_group_ids = [aws_security_group.rate_limiter.id]
 
-  user_data = templatefile("${path.module}/user_data.tftpl", {
-    ghcr_user              = var.ghcr_user
-    node_port              = var.node_port
-    spring_port            = var.spring_port
-    rate_limiter_max_tokens  = var.rate_limiter_max_tokens
-    rate_limiter_refill_rate = var.rate_limiter_refill_rate
-  })
+  user_data = file("${path.module}/user_data.tftpl")
 
   tags = {
     Name = "rate-limiter"

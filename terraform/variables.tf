@@ -22,11 +22,6 @@ variable "instance_type" {
   default     = "t3.small"
 }
 
-variable "ghcr_user" {
-  description = "GitHub Container Registry username"
-  type        = string
-}
-
 variable "node_port" {
   description = "Internal port for Node.js backend"
   type        = number
