@@ -4,6 +4,11 @@ variable "aws_region" {
   default     = "ap-east-1"
 }
 
+variable "docker_user" {
+  description = "Docker Hub username for pulling images"
+  type        = string
+}
+
 variable "rate_limiter_max_tokens" {
   description = "Max tokens for rate limiter"
   type        = number
@@ -14,12 +19,6 @@ variable "rate_limiter_refill_rate" {
   description = "Refill rate for rate limiter (tokens per second)"
   type        = number
   default     = 10
-}
-
-variable "instance_type" {
-  description = "EC2 instance type"
-  type        = string
-  default     = "t3.small"
 }
 
 variable "node_port" {

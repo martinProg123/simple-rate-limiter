@@ -5,29 +5,17 @@ on:
   push:
     branches: [main]
 
-env:
-  REGISTRY: ghcr.io
-
 jobs:
   docker:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Lowercase owner
-        run: echo "LOWER_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
-
-      - name: Log in to GHCR
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ env.LOWER_OWNER }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -37,7 +25,7 @@ jobs:
         with:
           context: ./rate-limiter
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.LOWER_OWNER }}/rate-limiter:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/rate-limiter:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -46,7 +34,7 @@ jobs:
         with:
           context: ./node-backend
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.LOWER_OWNER }}/node-backend:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/node-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -56,12 +44,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      packages: read
     steps:
       - uses: actions/checkout@v4
-
-      - name: Lowercase owner
-        run: echo "LOWER_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -82,67 +66,33 @@ jobs:
         id: tf-apply
         working-directory: ./terraform
         run: terraform apply -auto-approve
+        env:
+          TF_VAR_docker_user: ${{ secrets.DOCKER_USERNAME }}
 
-      - name: Get EC2 info
-        id: ec2-info
+      - name: Get ALB DNS
+        id: alb-info
         working-directory: ./terraform
-        run: |
-          echo "instance_id=$(terraform output -raw instance_id)" >> $GITHUB_OUTPUT
-          echo "public_ip=$(terraform output -raw instance_public_ip)" >> $GITHUB_OUTPUT
+        run: echo "dns=$(terraform output -raw alb_dns_name)" >> $GITHUB_OUTPUT
 
-      - name: Wait for SSM agent
-        env:
-          INSTANCE_ID: ${{ steps.ec2-info.outputs.instance_id }}
+      - name: Force ECS deployment
         run: |
-          for i in $(seq 1 36); do
-            STATUS=$(aws ssm describe-instance-information \
-              --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
-              --query "InstanceInformationList[0].PingStatus" \
-              --output text 2>/dev/null || echo "Unknown")
-            if [ "$STATUS" = "Online" ]; then
-              echo "SSM agent online"
-              exit 0
-            fi
-            echo "Waiting for SSM agent... attempt $i"
-            sleep 10
-          done
-          echo "SSM agent not online after 6 minutes"
-          exit 1
+          aws ecs update-service \
+            --cluster rate-limiter-cluster \
+            --service rate-limiter \
+            --force-new-deployment
 
-      - name: Deploy via SSM
-        env:
-          INSTANCE_ID: ${{ steps.ec2-info.outputs.instance_id }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_USER: ${{ env.LOWER_OWNER }}
+      - name: Wait for ECS stability
         run: |
-          COMPOSE_BASE64=$(printf 'services:\n  redis:\n    image: redis:7-alpine\n    restart: always\n    volumes:\n      - redis-data:/data\n\n  node-backend:\n    image: ghcr.io/__GHCR_USER__/node-backend:latest\n    restart: always\n\n  rate-limiter:\n    image: ghcr.io/__GHCR_USER__/rate-limiter:latest\n    ports:\n      - "80:3051"\n    restart: always\n    environment:\n      - SERVER_PORT=3051\n      - REDIS_HOST=redis\n      - REDIS_PORT=6379\n      - BACKEND_URL=http://node-backend:3050\n      - RATE_LIMITER_MAX_TOKENS=50\n      - RATE_LIMITER_REFILL_RATE=10\n    depends_on:\n      - redis\n      - node-backend\n\nvolumes:\n  redis-data:\n' | base64 -w0)
-          COMMANDS_JSON=$(jq -n \
-            --arg c1 'for i in $(seq 1 12); do if sudo docker info >/dev/null 2>&1; then break; fi; sleep 10; done' \
-            --arg c2 "sudo mkdir -p /opt/rate-limiter && echo '$COMPOSE_BASE64' | base64 -d | sed 's/__GHCR_USER__/$GH_USER/g' | sudo tee /opt/rate-limiter/docker-compose.yml > /dev/null" \
-            --arg c3 "echo $GH_TOKEN | sudo docker login ghcr.io -u $GH_USER --password-stdin" \
-            --arg c4 'cd /opt/rate-limiter && sudo docker compose pull && sudo docker compose up -d' \
-            '{commands: [$c1, $c2, $c3, $c4]}')
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "$COMMANDS_JSON" \
-            --output text \
-            --query "Command.CommandId")
-          aws ssm wait command-executed \
-            --command-id "$COMMAND_ID" \
-            --instance-id "$INSTANCE_ID" || \
-            (aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query "StandardErrorContent" \
-              --output text && exit 1)
+          aws ecs wait services-stable \
+            --cluster rate-limiter-cluster \
+            --services rate-limiter
 
       - name: Wait for services
         env:
-          EC2_IP: ${{ steps.ec2-info.outputs.public_ip }}
+          ALB_DNS: ${{ steps.alb-info.outputs.dns }}
         run: |
           for i in $(seq 1 30); do
-            if curl -sf -X POST "http://${EC2_IP}/api/keys" > /dev/null 2>&1; then
+            if curl -sf -X POST "http://${ALB_DNS}/api/keys" > /dev/null 2>&1; then
               echo "Services ready"
               exit 0
             fi
@@ -156,21 +106,23 @@ jobs:
         uses: grafana/k6-action@v0.3.1
         with:
           filename: k6-tests/smoke-test.js
-          flags: -e BASE_URL=http://${{ steps.ec2-info.outputs.public_ip }}
+          flags: -e BASE_URL=http://${{ steps.alb-info.outputs.dns }}
 
       - name: Post-deploy k6 rate-limit test
         uses: grafana/k6-action@v0.3.1
         with:
           filename: k6-tests/rate-limit-test.js
-          flags: -e BASE_URL=http://${{ steps.ec2-info.outputs.public_ip }}
+          flags: -e BASE_URL=http://${{ steps.alb-info.outputs.dns }}
 
       - name: Post-deploy k6 spike test
         uses: grafana/k6-action@v0.3.1
         with:
           filename: k6-tests/spike-test.js
-          flags: -e BASE_URL=http://${{ steps.ec2-info.outputs.public_ip }}
+          flags: -e BASE_URL=http://${{ steps.alb-info.outputs.dns }}
 
       - name: Terraform Destroy
         if: always()
         working-directory: ./terraform
         run: terraform destroy -auto-approve
+        env:
+          TF_VAR_docker_user: ${{ secrets.DOCKER_USERNAME }}
