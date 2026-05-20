@@ -1,9 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-GHCR_USER="${ghcr_user}"
-GHCR_TOKEN="${ghcr_token}"
-
 # Install Docker
 dnf install -y docker
 systemctl enable --now docker
@@ -11,9 +8,6 @@ usermod -aG docker ec2-user
 
 # Install Docker Compose plugin
 dnf install -y docker-compose-plugin
-
-# Login to GHCR
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
 # Create app directory
 mkdir -p /opt/rate-limiter
@@ -41,6 +35,8 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - BACKEND_URL=http://node-backend:${node_port}
+      - RATE_LIMITER_MAX_TOKENS=${rate_limiter_max_tokens}
+      - RATE_LIMITER_REFILL_RATE=${rate_limiter_refill_rate}
     depends_on:
       - redis
       - node-backend
@@ -48,6 +44,3 @@ services:
 volumes:
   redis-data:
 COMPOSE
-
-# Start services
-docker compose up -d

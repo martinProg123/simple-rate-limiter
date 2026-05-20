@@ -11,6 +11,31 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_iam_policy_document" "ec2_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ssm" {
+  name               = "rate-limiter-ssm"
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ssm" {
+  name = "rate-limiter-ssm"
+  role = aws_iam_role.ssm.name
+}
+
 data "aws_ami" "amazon_linux" {
   most_recent = true
   owners      = ["amazon"]
@@ -29,13 +54,6 @@ data "aws_ami" "amazon_linux" {
 resource "aws_security_group" "rate_limiter" {
   name        = "rate-limiter-sg"
   description = "Security group for rate limiter instance"
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   ingress {
     from_port   = 80
@@ -59,14 +77,15 @@ resource "aws_security_group" "rate_limiter" {
 resource "aws_instance" "rate_limiter" {
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.instance_type
-  key_name               = var.ssh_key_name
+  iam_instance_profile   = aws_iam_instance_profile.ssm.name
   vpc_security_group_ids = [aws_security_group.rate_limiter.id]
 
   user_data = templatefile("${path.module}/user_data.tftpl", {
-    ghcr_user   = var.ghcr_user
-    ghcr_token  = var.ghcr_token
-    node_port   = var.node_port
-    spring_port = var.spring_port
+    ghcr_user              = var.ghcr_user
+    node_port              = var.node_port
+    spring_port            = var.spring_port
+    rate_limiter_max_tokens  = var.rate_limiter_max_tokens
+    rate_limiter_refill_rate = var.rate_limiter_refill_rate
   })
 
   tags = {

@@ -1,7 +1,19 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
+  default     = "ap-east-1"
+}
+
+variable "rate_limiter_max_tokens" {
+  description = "Max tokens for rate limiter"
+  type        = number
+  default     = 50
+}
+
+variable "rate_limiter_refill_rate" {
+  description = "Refill rate for rate limiter (tokens per second)"
+  type        = number
+  default     = 10
 }
 
 variable "instance_type" {
@@ -10,20 +22,9 @@ variable "instance_type" {
   default     = "t3.small"
 }
 
-variable "ssh_key_name" {
-  description = "Name of the SSH key pair"
-  type        = string
-}
-
 variable "ghcr_user" {
   description = "GitHub Container Registry username"
   type        = string
-}
-
-variable "ghcr_token" {
-  description = "GitHub Container Registry token (classic PAT with read:packages)"
-  type        = string
-  sensitive   = true
 }
 
 variable "node_port" {
