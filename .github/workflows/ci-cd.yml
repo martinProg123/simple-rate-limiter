@@ -14,7 +14,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      
+
     steps:
       - uses: actions/checkout@v4
 
@@ -116,17 +116,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USER: ${{ env.LOWER_OWNER }}
         run: |
-          COMMANDS_JSON=$(jq -n \
-            --arg c1 'for i in $(seq 1 12); do if docker info >/dev/null 2>&1; then break; fi; echo "Waiting for Docker..."; sleep 10; done' \
-            --arg c2 'docker info >/dev/null 2>&1 || { echo "Docker not ready"; exit 1; }' \
-            --arg c3 "echo $GH_TOKEN | docker login ghcr.io -u $GH_USER --password-stdin" \
-            --arg c4 'cd /opt/rate-limiter && docker compose pull && docker compose up -d' \
-            '{commands: [$c1, $c2, $c3, $c4]}')
-          aws ssm send-command \
+          COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters "$COMMANDS_JSON" \
-            --wait-for-success
+            --parameters "$(jq -n \
+              --arg c1 'for i in $(seq 1 12); do if docker info >/dev/null 2>&1; then break; fi; echo "Waiting for Docker..."; sleep 10; done' \
+              --arg c2 'docker info >/dev/null 2>&1 || { echo "Docker not ready"; exit 1; }' \
+              --arg c3 "echo $GH_TOKEN | docker login ghcr.io -u $GH_USER --password-stdin" \
+              --arg c4 'cd /opt/rate-limiter && docker compose pull && docker compose up -d' \
+              '{commands: [$c1, $c2, $c3, $c4]}')" \
+            --output text \
+            --query "Command.CommandId")
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID"
 
       - name: Wait for services
         env:
